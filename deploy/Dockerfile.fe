@@ -1,0 +1,17 @@
+FROM oven/bun:1 AS builder
+WORKDIR /app
+COPY src/frontend/package.json src/frontend/bun.lock* ./
+RUN bun install
+COPY src/frontend/ .
+RUN bun run build
+
+FROM oven/bun:1-alpine AS runtime
+RUN adduser -D -s /bin/false vellum
+WORKDIR /app
+COPY --from=builder --chown=vellum /app/build ./build
+COPY --from=builder --chown=vellum /app/package.json .
+COPY --from=builder --chown=vellum /app/node_modules ./node_modules
+ENV PORT=3001
+EXPOSE 3001
+USER vellum
+CMD ["bun", "build/index.js"]

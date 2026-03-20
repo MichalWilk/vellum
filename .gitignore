@@ -1,0 +1,19 @@
+# Rust
+src/backend/target/
+**/*.rs.bk
+
+# Config secrets
+config.local.toml
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Frontend
+src/frontend/node_modules/
+src/frontend/.svelte-kit/
+
+# OS
+.DS_Store

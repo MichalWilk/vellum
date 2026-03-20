@@ -1,0 +1,12 @@
+src/backend/target/
+src/frontend/node_modules/
+src/frontend/.svelte-kit/
+.git/
+.env
+config.local.toml
+.claude/
+CLAUDE.md
+docs/superpowers/
+*.swp
+.idea/
+.vscode/

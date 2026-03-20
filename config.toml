@@ -1,0 +1,32 @@
+[app]
+host = "0.0.0.0"
+port = 3000
+log_level = "info"
+
+[auth]
+mode = "oidc"
+default_roles = ["*"]
+
+[auth.oidc]
+issuer_url = "http://keycloak:8080/realms/vellum"
+client_id = "vellum"
+
+[auth.oidc.session]
+redis_url = "redis://localhost:6379"
+cookie_name = "vellum_session"
+cookie_secure = false
+
+[[vaults]]
+name = "docs"
+path = "vaults/docs"
+description = "User documentation"
+
+[[vaults]]
+name = "dev"
+path = "vaults/dev"
+description = "Technical documentation"
+
+[[vaults]]
+name = "demo"
+path = "vaults/demo"
+description = "Feature showcase"

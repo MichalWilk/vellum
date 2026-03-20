@@ -1,0 +1,5 @@
+[access]
+roles = ["*"]
+
+[access.paths]
+"protected/" = ["dev"]
