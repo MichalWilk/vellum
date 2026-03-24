@@ -21,6 +21,13 @@
 	);
 	let selectedTag = $state<string | null>(null);
 
+	const searchLabels: Record<SearchType, { placeholder: string; empty: string; heading: string }> = {
+		content: { placeholder: 'Search content...', empty: 'No documents found.', heading: 'Results' },
+		files: { placeholder: 'Search files...', empty: 'No files found.', heading: 'Files' },
+		tags: { placeholder: 'Search tags...', empty: 'No tags found.', heading: 'Tags' },
+		headings: { placeholder: 'Search headings...', empty: 'No headings found.', heading: 'Headings' },
+	};
+
 	let vault = $derived((() => {
 		const match = page.url.pathname.match(/^\/(docs|graph)\/([^/]+)/);
 		return match ? match[2] : null;
@@ -79,10 +86,21 @@
 		}
 	}
 
+	function escapeHtml(s: string): string {
+		return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	}
+
 	function sanitizeSnippet(html: string): string {
-		let safe = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-		safe = safe.replace(/&lt;b&gt;/g, '<b>').replace(/&lt;\/b&gt;/g, '</b>');
+		let safe = escapeHtml(html);
+		safe = safe.replace(/&lt;b&gt;/g, '<mark>').replace(/&lt;\/b&gt;/g, '</mark>');
 		return safe;
+	}
+
+	function highlightMatch(text: string, q: string): string {
+		const escaped = escapeHtml(text);
+		if (!q) return escaped;
+		const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+		return escaped.replace(re, '<mark>$1</mark>');
 	}
 
 	function setSearchType(t: SearchType) {
@@ -187,6 +205,7 @@
 			{ type: 'headings', label: 'Headings', key: '4' }
 		] as tab}
 			<button
+				tabindex={-1}
 				class="rounded-md px-2.5 py-1 text-xs font-medium transition-colors {searchType === tab.type
 					? 'bg-accent text-accent-foreground'
 					: 'text-muted-foreground hover:text-foreground hover:bg-accent/50'}"
@@ -200,40 +219,23 @@
 	{#if selectedTag}
 		<div class="flex items-center gap-2 border-b px-3 py-2">
 			<span class="bg-primary/10 text-primary rounded px-2 py-0.5 text-xs font-medium">#{selectedTag}</span>
-			<button class="text-muted-foreground hover:text-foreground text-xs" onclick={clearTag}>clear</button>
+			<button tabindex={-1} class="text-muted-foreground hover:text-foreground text-xs" onclick={clearTag}>clear</button>
 		</div>
 	{/if}
-	<Command.Input
-		placeholder={searchType === 'content'
-			? 'Search content...'
-			: searchType === 'files'
-				? 'Search files...'
-				: searchType === 'tags'
-					? 'Search tags...'
-					: 'Search headings...'}
-		bind:value={query}
-	/>
+	<Command.Input placeholder={searchLabels[searchType].placeholder} bind:value={query} />
 	<Command.List>
 		{#if (query.trim().length > 0 || selectedTag) && results.length === 0}
-			<Command.Empty>
-				{searchType === 'content'
-					? 'No documents found.'
-					: searchType === 'files'
-						? 'No files found.'
-						: searchType === 'tags'
-							? 'No tags found.'
-							: 'No headings found.'}
-			</Command.Empty>
+			<Command.Empty>{searchLabels[searchType].empty}</Command.Empty>
 		{/if}
 		{#if results.length > 0}
-			<Command.Group heading={selectedTag ? `Documents with #${selectedTag}` : searchType === 'content' ? 'Results' : searchType === 'files' ? 'Files' : searchType === 'tags' ? 'Tags' : 'Headings'}>
+			<Command.Group heading={selectedTag ? `Documents with #${selectedTag}` : searchLabels[searchType].heading}>
 				{#each results as result (result.result_type === 'tag' ? result.tag : `${result.path}${result.anchor ?? ''}`)}
 					<Command.Item onSelect={() => selectResult(result)}>
 						{#if result.result_type === 'tag'}
 							<div class="flex w-full items-center justify-between">
 								<div class="flex items-center gap-2">
 									<Hash class="text-muted-foreground h-3.5 w-3.5" />
-									<span class="text-sm font-medium">{result.tag}</span>
+									<span class="text-sm font-medium">{@html highlightMatch(result.tag ?? '', query)}</span>
 								</div>
 								<span class="text-muted-foreground text-xs">{result.doc_count} docs</span>
 							</div>
@@ -241,7 +243,7 @@
 							<div class="flex items-center gap-2">
 								<span class="text-muted-foreground text-[10px] font-bold">H{result.heading_level}</span>
 								<div class="flex flex-col gap-0.5">
-									<span class="text-sm font-medium">{result.snippet}</span>
+									<span class="text-sm font-medium">{@html highlightMatch(result.title, query)}</span>
 									<span class="text-muted-foreground text-xs">{result.path}</span>
 								</div>
 							</div>
@@ -249,7 +251,7 @@
 							<div class="flex items-center gap-2">
 								<FileText class="text-muted-foreground h-3.5 w-3.5" />
 								<div class="flex flex-col gap-0.5">
-									<span class="text-sm font-medium">{result.path}</span>
+									<span class="text-sm font-medium">{@html highlightMatch(result.path, query)}</span>
 									{#if result.title}
 										<span class="text-muted-foreground text-xs">{result.title}</span>
 									{/if}
@@ -260,7 +262,7 @@
 								<span class="text-sm font-medium">{result.title || result.path}</span>
 								<span class="text-muted-foreground text-xs">{result.path}</span>
 								{#if result.snippet}
-									<span class="text-muted-foreground mt-0.5 text-xs [&_b]:font-medium">
+									<span class="text-muted-foreground mt-0.5 text-xs">
 										{@html sanitizeSnippet(result.snippet)}
 									</span>
 								{/if}

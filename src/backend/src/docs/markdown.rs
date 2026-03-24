@@ -505,15 +505,15 @@ pub struct HeadingInfo {
 
 /// Extract all headings from raw markdown content.
 pub fn extract_headings(raw: &str) -> Vec<HeadingInfo> {
-    use pulldown_cmark::{Event, Parser, Tag, TagEnd, HeadingLevel};
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 
     let (_, body) = parse_frontmatter(raw);
     let parser = Parser::new(body);
     let mut headings = Vec::new();
     let mut heading_text = String::new();
     let mut in_heading = false;
-    let mut current_level: Option<HeadingLevel> = None;
-    let mut slug_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut current_level: Option<pulldown_cmark::HeadingLevel> = None;
+    let mut slugs = SlugCounter::new();
 
     for event in parser {
         match event {
@@ -524,24 +524,8 @@ pub fn extract_headings(raw: &str) -> Vec<HeadingInfo> {
             }
             Event::End(TagEnd::Heading(_)) => {
                 in_heading = false;
-                let base_slug = slugify(&heading_text);
-                let count = slug_counts.entry(base_slug.clone()).or_insert(0);
-                let anchor = if *count == 0 {
-                    base_slug.clone()
-                } else {
-                    format!("{base_slug}-{count}")
-                };
-                *count += 1;
-
-                let level_num = match current_level {
-                    Some(HeadingLevel::H1) => 1,
-                    Some(HeadingLevel::H2) => 2,
-                    Some(HeadingLevel::H3) => 3,
-                    Some(HeadingLevel::H4) => 4,
-                    Some(HeadingLevel::H5) => 5,
-                    Some(HeadingLevel::H6) => 6,
-                    None => 1,
-                };
+                let anchor = slugs.next_slug(&heading_text);
+                let level_num = current_level.map(heading_level_to_u8).unwrap_or(1);
 
                 headings.push(HeadingInfo {
                     level: level_num,
@@ -557,11 +541,44 @@ pub fn extract_headings(raw: &str) -> Vec<HeadingInfo> {
             Event::Code(ref t) if in_heading => {
                 heading_text.push_str(t);
             }
+            Event::SoftBreak | Event::HardBreak if in_heading => {
+                heading_text.push(' ');
+            }
             _ => {}
         }
     }
 
     headings
+}
+
+struct SlugCounter {
+    counts: std::collections::HashMap<String, usize>,
+}
+
+impl SlugCounter {
+    fn new() -> Self {
+        Self { counts: std::collections::HashMap::new() }
+    }
+
+    fn next_slug(&mut self, text: &str) -> String {
+        let base = slugify(text);
+        let count = self.counts.entry(base.clone()).or_insert(0);
+        let slug = if *count == 0 { base.clone() } else { format!("{base}-{count}") };
+        *count += 1;
+        slug
+    }
+}
+
+fn heading_level_to_u8(level: pulldown_cmark::HeadingLevel) -> u8 {
+    use pulldown_cmark::HeadingLevel;
+    match level {
+        HeadingLevel::H1 => 1,
+        HeadingLevel::H2 => 2,
+        HeadingLevel::H3 => 3,
+        HeadingLevel::H4 => 4,
+        HeadingLevel::H5 => 5,
+        HeadingLevel::H6 => 6,
+    }
 }
 
 /// Generate a URL-safe anchor slug from heading text.
@@ -578,7 +595,7 @@ pub fn slugify(text: &str) -> String {
 }
 
 fn render_markdown(body: &str) -> String {
-    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, HeadingLevel};
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
@@ -589,8 +606,8 @@ fn render_markdown(body: &str) -> String {
     let mut html_output = String::new();
     let mut heading_text = String::new();
     let mut in_heading = false;
-    let mut heading_level: Option<HeadingLevel> = None;
-    let mut slug_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut heading_level: Option<pulldown_cmark::HeadingLevel> = None;
+    let mut slugs = SlugCounter::new();
 
     for event in parser {
         match event {
@@ -601,24 +618,8 @@ fn render_markdown(body: &str) -> String {
             }
             Event::End(TagEnd::Heading(_)) => {
                 in_heading = false;
-                let base_slug = slugify(&heading_text);
-                let count = slug_counts.entry(base_slug.clone()).or_insert(0);
-                let slug = if *count == 0 {
-                    base_slug.clone()
-                } else {
-                    format!("{base_slug}-{count}")
-                };
-                *count += 1;
-
-                let level_num = match heading_level {
-                    Some(HeadingLevel::H1) => 1,
-                    Some(HeadingLevel::H2) => 2,
-                    Some(HeadingLevel::H3) => 3,
-                    Some(HeadingLevel::H4) => 4,
-                    Some(HeadingLevel::H5) => 5,
-                    Some(HeadingLevel::H6) => 6,
-                    None => 1,
-                };
+                let slug = slugs.next_slug(&heading_text);
+                let level_num = heading_level.map(heading_level_to_u8).unwrap_or(1);
                 html_output.push_str(&format!(
                     "<h{level_num} id=\"{slug}\">{heading_text}</h{level_num}>\n"
                 ));
@@ -630,6 +631,9 @@ fn render_markdown(body: &str) -> String {
             }
             Event::Code(ref t) if in_heading => {
                 heading_text.push_str(t);
+            }
+            Event::SoftBreak | Event::HardBreak if in_heading => {
+                heading_text.push(' ');
             }
             _ if in_heading => {
                 // Skip inline formatting events inside headings - plain text only

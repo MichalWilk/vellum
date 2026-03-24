@@ -113,10 +113,9 @@ pub async fn search(
             SearchType::Tags => {
                 if let Some(ref exact_tag) = tag {
                     RawSearchData::Tags(index.search_by_tag(exact_tag, limit * 2))
-                } else if q.is_empty() {
-                    RawSearchData::Tags(index.all_tags())
                 } else {
-                    RawSearchData::Tags(index.search_tags(&q, limit * 2))
+                    // Always scan all docs - aggregate_tags does prefix filtering
+                    RawSearchData::Tags(index.all_tags())
                 }
             }
             SearchType::Headings => {
@@ -128,40 +127,28 @@ pub async fn search(
         }
     };
 
-    if auth_mode == AuthMode::None {
-        let results = tokio::task::spawn_blocking(move || match raw_data {
-            RawSearchData::Content(raw) => filter_and_map_content(raw, limit),
-            RawSearchData::Files(raw) => filter_and_map_files(raw, limit),
-            RawSearchData::Tags(raw) => aggregate_tags(raw, &q, limit),
-            RawSearchData::Headings(raw) => expand_headings(raw, &q, limit),
-        })
-        .await
-        .unwrap_or_default();
-        return Json(results).into_response();
-    }
-
-    let configs = {
+    let configs = if auth_mode != AuthMode::None {
         let guard = vault_configs.read().await;
-        guard.get(vault_name).cloned().unwrap_or_default()
+        Some(guard.get(vault_name).cloned().unwrap_or_default())
+    } else {
+        None
     };
 
+    macro_rules! apply_access {
+        ($raw:expr) => {
+            if let Some(ref configs) = configs {
+                filter_by_access($raw, |r| &r.path, &user, configs, &default_roles)
+            } else {
+                $raw
+            }
+        };
+    }
+
     let results = tokio::task::spawn_blocking(move || match raw_data {
-        RawSearchData::Content(raw) => {
-            let filtered = filter_by_access(raw, &user, &configs, &default_roles);
-            filter_and_map_content(filtered, limit)
-        }
-        RawSearchData::Files(raw) => {
-            let filtered = filter_by_access(raw, &user, &configs, &default_roles);
-            filter_and_map_files(filtered, limit)
-        }
-        RawSearchData::Tags(raw) => {
-            let filtered = filter_tags_by_access(raw, &user, &configs, &default_roles);
-            aggregate_tags(filtered, &q, limit)
-        }
-        RawSearchData::Headings(raw) => {
-            let filtered = filter_headings_by_access(raw, &user, &configs, &default_roles);
-            expand_headings(filtered, &q, limit)
-        }
+        RawSearchData::Content(raw) => filter_and_map_content(apply_access!(raw), limit),
+        RawSearchData::Files(raw) => filter_and_map_files(apply_access!(raw), limit),
+        RawSearchData::Tags(raw) => aggregate_tags(apply_access!(raw), &q, limit),
+        RawSearchData::Headings(raw) => expand_headings(apply_access!(raw), &q, limit),
     })
     .await
     .unwrap_or_default();
@@ -179,51 +166,32 @@ fn check_user_access(
     vault_config::check_access(&user.roles, &roles)
 }
 
-fn filter_by_access(
-    raw: Vec<crate::search::index::SearchResult>,
+fn filter_by_access<T>(
+    raw: Vec<T>,
+    get_path: impl Fn(&T) -> &str,
     user: &User,
     configs: &VaultConfigCache,
     default_roles: &[String],
-) -> Vec<crate::search::index::SearchResult> {
+) -> Vec<T> {
     raw.into_iter()
-        .filter(|r| check_user_access(&r.path, user, configs, default_roles))
+        .filter(|r| check_user_access(get_path(r), user, configs, default_roles))
         .collect()
 }
 
-fn filter_tags_by_access(
-    raw: Vec<crate::search::index::TagSearchResult>,
-    user: &User,
-    configs: &VaultConfigCache,
-    default_roles: &[String],
-) -> Vec<crate::search::index::TagSearchResult> {
-    raw.into_iter()
-        .filter(|r| check_user_access(&r.path, user, configs, default_roles))
-        .collect()
-}
-
-fn filter_headings_by_access(
-    raw: Vec<crate::search::index::HeadingSearchResult>,
-    user: &User,
-    configs: &VaultConfigCache,
-    default_roles: &[String],
-) -> Vec<crate::search::index::HeadingSearchResult> {
-    raw.into_iter()
-        .filter(|r| check_user_access(&r.path, user, configs, default_roles))
-        .collect()
-}
-
-fn filter_and_map_content(
+fn map_search_results(
     raw: Vec<crate::search::index::SearchResult>,
     limit: usize,
+    result_type: &str,
+    include_snippet: bool,
 ) -> Vec<SearchResultResponse> {
     raw.into_iter()
         .take(limit)
         .map(|r| SearchResultResponse {
+            snippet: if include_snippet { r.snippet } else { String::new() },
             path: r.path,
             title: r.title,
-            snippet: r.snippet,
             score: r.score,
-            result_type: "content".to_string(),
+            result_type: result_type.to_string(),
             anchor: None,
             tag: None,
             doc_count: None,
@@ -232,24 +200,12 @@ fn filter_and_map_content(
         .collect()
 }
 
-fn filter_and_map_files(
-    raw: Vec<crate::search::index::SearchResult>,
-    limit: usize,
-) -> Vec<SearchResultResponse> {
-    raw.into_iter()
-        .take(limit)
-        .map(|r| SearchResultResponse {
-            path: r.path,
-            title: r.title,
-            snippet: String::new(),
-            score: r.score,
-            result_type: "file".to_string(),
-            anchor: None,
-            tag: None,
-            doc_count: None,
-            heading_level: None,
-        })
-        .collect()
+fn filter_and_map_content(raw: Vec<crate::search::index::SearchResult>, limit: usize) -> Vec<SearchResultResponse> {
+    map_search_results(raw, limit, "content", true)
+}
+
+fn filter_and_map_files(raw: Vec<crate::search::index::SearchResult>, limit: usize) -> Vec<SearchResultResponse> {
+    map_search_results(raw, limit, "file", false)
 }
 
 fn aggregate_tags(
@@ -258,10 +214,11 @@ fn aggregate_tags(
     limit: usize,
 ) -> Vec<SearchResultResponse> {
     let mut tag_counts: HashMap<String, u32> = HashMap::new();
+    let query_lower = query.to_lowercase();
 
     for result in &raw {
         for tag in result.tags.split_whitespace() {
-            if query.is_empty() || tag.starts_with(&query.to_lowercase()) {
+            if query_lower.is_empty() || tag.contains(&query_lower) {
                 *tag_counts.entry(tag.to_string()).or_insert(0) += 1;
             }
         }
