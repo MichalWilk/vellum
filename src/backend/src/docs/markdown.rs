@@ -496,6 +496,74 @@ pub fn extract_tags(raw: &str) -> Vec<String> {
     tags
 }
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct HeadingInfo {
+    pub level: u8,
+    pub text: String,
+    pub anchor: String,
+}
+
+/// Extract all headings from raw markdown content.
+pub fn extract_headings(raw: &str) -> Vec<HeadingInfo> {
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd, HeadingLevel};
+
+    let (_, body) = parse_frontmatter(raw);
+    let parser = Parser::new(body);
+    let mut headings = Vec::new();
+    let mut heading_text = String::new();
+    let mut in_heading = false;
+    let mut current_level: Option<HeadingLevel> = None;
+    let mut slug_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+    for event in parser {
+        match event {
+            Event::Start(Tag::Heading { level, .. }) => {
+                in_heading = true;
+                current_level = Some(level);
+                heading_text.clear();
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                in_heading = false;
+                let base_slug = slugify(&heading_text);
+                let count = slug_counts.entry(base_slug.clone()).or_insert(0);
+                let anchor = if *count == 0 {
+                    base_slug.clone()
+                } else {
+                    format!("{base_slug}-{count}")
+                };
+                *count += 1;
+
+                let level_num = match current_level {
+                    Some(HeadingLevel::H1) => 1,
+                    Some(HeadingLevel::H2) => 2,
+                    Some(HeadingLevel::H3) => 3,
+                    Some(HeadingLevel::H4) => 4,
+                    Some(HeadingLevel::H5) => 5,
+                    Some(HeadingLevel::H6) => 6,
+                    None => 1,
+                };
+
+                headings.push(HeadingInfo {
+                    level: level_num,
+                    text: heading_text.clone(),
+                    anchor,
+                });
+                heading_text.clear();
+                current_level = None;
+            }
+            Event::Text(ref t) if in_heading => {
+                heading_text.push_str(t);
+            }
+            Event::Code(ref t) if in_heading => {
+                heading_text.push_str(t);
+            }
+            _ => {}
+        }
+    }
+
+    headings
+}
+
 /// Generate a URL-safe anchor slug from heading text.
 /// Lowercase, spaces to hyphens, strip non-alphanumeric except hyphens.
 pub fn slugify(text: &str) -> String {
