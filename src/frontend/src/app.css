@@ -128,6 +128,15 @@
 	}
 }
 
+.prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+	scroll-margin-top: 4rem;
+}
+
+/* Search result highlight */
+[data-slot="command-item"] mark {
+	border-radius: 0.125rem;
+}
+
 .prose pre {
 	background-color: var(--muted) !important;
 	border: 1px solid var(--border);

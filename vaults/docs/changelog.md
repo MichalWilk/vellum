@@ -12,6 +12,10 @@ All notable changes to Vellum are documented here. This project follows [Semanti
 ### Added
 - Multi-vault support - configure multiple independent document repositories
 - Full-text search powered by Tantivy with `Cmd+K` command palette
+  - Four search modes: Content, Files, Tags, Headings
+  - Alt+1-4 shortcuts to switch modes
+  - Last used mode persisted in browser
+  - Tag drill-down: click tag to see related documents
 - Graph view showing `[[wikilink]]` relationships between documents
 - Role-based access control via `.vault.toml` per directory
 - OIDC authentication with Keycloak (Authorization Code Flow)

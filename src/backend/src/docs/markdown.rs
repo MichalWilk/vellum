@@ -72,6 +72,9 @@ pub fn render_document(
     sanitizer.add_tag_attributes("p", &["class"]);
     sanitizer.add_tag_attributes("span", &["class", "data-type"]);
     sanitizer.add_tags(&["mark", "details", "summary"]);
+    for tag in &["h1", "h2", "h3", "h4", "h5", "h6"] {
+        sanitizer.add_tag_attributes(tag, &["id"]);
+    }
     let sanitized = sanitizer.clean(&html).to_string();
     let sanitized = restore_callout_icons(&sanitized);
     (frontmatter, sanitized)
@@ -493,8 +496,106 @@ pub fn extract_tags(raw: &str) -> Vec<String> {
     tags
 }
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct HeadingInfo {
+    pub level: u8,
+    pub text: String,
+    pub anchor: String,
+}
+
+/// Extract all headings from raw markdown content.
+pub fn extract_headings(raw: &str) -> Vec<HeadingInfo> {
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+
+    let (_, body) = parse_frontmatter(raw);
+    let parser = Parser::new(body);
+    let mut headings = Vec::new();
+    let mut heading_text = String::new();
+    let mut in_heading = false;
+    let mut current_level: Option<pulldown_cmark::HeadingLevel> = None;
+    let mut slugs = SlugCounter::new();
+
+    for event in parser {
+        match event {
+            Event::Start(Tag::Heading { level, .. }) => {
+                in_heading = true;
+                current_level = Some(level);
+                heading_text.clear();
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                in_heading = false;
+                let anchor = slugs.next_slug(&heading_text);
+                let level_num = current_level.map(heading_level_to_u8).unwrap_or(1);
+
+                headings.push(HeadingInfo {
+                    level: level_num,
+                    text: heading_text.clone(),
+                    anchor,
+                });
+                heading_text.clear();
+                current_level = None;
+            }
+            Event::Text(ref t) if in_heading => {
+                heading_text.push_str(t);
+            }
+            Event::Code(ref t) if in_heading => {
+                heading_text.push_str(t);
+            }
+            Event::SoftBreak | Event::HardBreak if in_heading => {
+                heading_text.push(' ');
+            }
+            _ => {}
+        }
+    }
+
+    headings
+}
+
+struct SlugCounter {
+    counts: std::collections::HashMap<String, usize>,
+}
+
+impl SlugCounter {
+    fn new() -> Self {
+        Self { counts: std::collections::HashMap::new() }
+    }
+
+    fn next_slug(&mut self, text: &str) -> String {
+        let base = slugify(text);
+        let count = self.counts.entry(base.clone()).or_insert(0);
+        let slug = if *count == 0 { base.clone() } else { format!("{base}-{count}") };
+        *count += 1;
+        slug
+    }
+}
+
+fn heading_level_to_u8(level: pulldown_cmark::HeadingLevel) -> u8 {
+    use pulldown_cmark::HeadingLevel;
+    match level {
+        HeadingLevel::H1 => 1,
+        HeadingLevel::H2 => 2,
+        HeadingLevel::H3 => 3,
+        HeadingLevel::H4 => 4,
+        HeadingLevel::H5 => 5,
+        HeadingLevel::H6 => 6,
+    }
+}
+
+/// Generate a URL-safe anchor slug from heading text.
+/// Lowercase, spaces to hyphens, strip non-alphanumeric except hyphens.
+pub fn slugify(text: &str) -> String {
+    text.to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
 fn render_markdown(body: &str) -> String {
-    use pulldown_cmark::{html, Options, Parser};
+    use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
@@ -503,6 +604,47 @@ fn render_markdown(body: &str) -> String {
 
     let parser = Parser::new_ext(body, options);
     let mut html_output = String::new();
-    html::push_html(&mut html_output, parser);
+    let mut heading_text = String::new();
+    let mut in_heading = false;
+    let mut heading_level: Option<pulldown_cmark::HeadingLevel> = None;
+    let mut slugs = SlugCounter::new();
+
+    for event in parser {
+        match event {
+            Event::Start(Tag::Heading { level, .. }) => {
+                in_heading = true;
+                heading_level = Some(level);
+                heading_text.clear();
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                in_heading = false;
+                let slug = slugs.next_slug(&heading_text);
+                let level_num = heading_level.map(heading_level_to_u8).unwrap_or(1);
+                html_output.push_str(&format!(
+                    "<h{level_num} id=\"{slug}\">{heading_text}</h{level_num}>\n"
+                ));
+                heading_text.clear();
+                heading_level = None;
+            }
+            Event::Text(ref t) if in_heading => {
+                heading_text.push_str(t);
+            }
+            Event::Code(ref t) if in_heading => {
+                heading_text.push_str(t);
+            }
+            Event::SoftBreak | Event::HardBreak if in_heading => {
+                heading_text.push(' ');
+            }
+            _ if in_heading => {
+                // Skip inline formatting events inside headings - plain text only
+            }
+            other => {
+                let mut tmp = String::new();
+                pulldown_cmark::html::push_html(&mut tmp, std::iter::once(other));
+                html_output.push_str(&tmp);
+            }
+        }
+    }
+
     html_output
 }

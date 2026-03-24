@@ -1,4 +1,4 @@
-import type { User, FileNode, DocResponse, GraphData, SearchResult, VaultInfo } from './types';
+import type { User, FileNode, DocResponse, GraphData, SearchResult, VaultInfo, SearchType } from './types';
 
 type Fetch = typeof fetch;
 
@@ -38,10 +38,21 @@ export async function getGraph(f: Fetch, vault: string): Promise<GraphData> {
 	return res.json();
 }
 
-export async function searchDocs(f: Fetch, query: string, vault: string, limit = 10): Promise<SearchResult[]> {
-	const res = await f(
-		`/api/search?q=${encodeURIComponent(query)}&vault=${encodeURIComponent(vault)}&limit=${limit}`
-	);
+export async function searchDocs(
+	f: Fetch,
+	query: string,
+	vault: string,
+	searchType: SearchType = 'content',
+	limit = 20,
+	tag?: string
+): Promise<SearchResult[]> {
+	const params = new URLSearchParams();
+	if (query) params.set('q', query);
+	params.set('vault', vault);
+	params.set('limit', String(limit));
+	params.set('type', searchType);
+	if (tag) params.set('tag', tag);
+	const res = await f(`/api/search?${params.toString()}`);
 	if (!res.ok) return [];
 	return res.json();
 }

@@ -36,11 +36,18 @@ export interface GraphData {
 	edges: GraphEdge[];
 }
 
+export type SearchType = 'content' | 'files' | 'tags' | 'headings';
+
 export interface SearchResult {
 	path: string;
 	title: string;
 	snippet: string;
 	score: number;
+	result_type: string;
+	anchor?: string;
+	tag?: string;
+	doc_count?: number;
+	heading_level?: number;
 }
 
 export interface VaultInfo {
