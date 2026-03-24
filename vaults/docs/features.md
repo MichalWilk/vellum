@@ -63,6 +63,17 @@ Search across all accessible documents instantly:
 - Command palette UI (`Cmd+K` / `Ctrl+K`)
 - Debounced input with highlighted snippets
 
+### Search modes
+
+The command palette provides four specialized search modes (tab bar or `Alt+1-4`):
+
+- **Content** - full-text search across document titles and bodies
+- **Files** - fuzzy search by file name and path (minimum 2 characters)
+- **Tags** - browse all tags with document counts, click to drill down
+- **Headings** - search headings across all documents, jump to section with anchor
+
+Last used mode is remembered in your browser. Each mode has optimized debounce timing for responsiveness.
+
 ## Markdown rendering
 
 Vellum supports rich Markdown with extensions:

@@ -167,14 +167,20 @@ Nodes represent documents. Edges represent `[[wikilinks]]` from one document to 
 
 ### GET /api/search
 
-Full-text search across accessible documents.
+Full-text search across accessible documents with multiple search modes.
 
 **Query parameters:**
-- `q` (required) - search query string
+- `q` (optional) - search query string (required for `content`, `files`, `headings` modes; optional for `tags`)
+- `type` (optional) - search mode, defaults to `content`
+  - `content` - full-text search across titles and bodies
+  - `files` - fuzzy search by file name/path (requires min 2 characters in `q`)
+  - `tags` - browse all tags with document counts
+  - `headings` - search headings across documents
+- `tag` (optional) - exact tag name to filter results (used with `files` or `content` types for tag drill-down)
 - `limit` (optional) - max results, default `20`
 - `vault` (optional) - vault name
 
-**Response (200):**
+**Response (200) - Content/Files/Headings:**
 
 ```json
 [
@@ -187,10 +193,20 @@ Full-text search across accessible documents.
 ]
 ```
 
-**Errors:**
-- `400` - missing `q` parameter
+**Response (200) - Tags:**
 
-Results are filtered by user roles. Snippets contain highlighted matching terms.
+```json
+[
+  { "tag": "tutorial", "count": 12 },
+  { "tag": "api", "count": 8 },
+  { "tag": "setup", "count": 5 }
+]
+```
+
+**Errors:**
+- `400` - missing required `q` parameter for this mode
+
+Results are filtered by user roles. Snippets (in non-tag modes) contain highlighted matching terms.
 
 ---
 
